@@ -1,0 +1,35 @@
+\documentclass[border=1mm]{standalone}
+\usepackage{amssymb, amsmath}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{wrapfig}
+\usepackage{float}
+\usepackage{colortbl}
+\usepackage{pdflscape}
+\usepackage{tabu}
+\usepackage{threeparttable}
+\usepackage{threeparttablex}
+\usepackage[normalem]{ulem}
+\usepackage[utf8]{inputenc}
+\usepackage{makecell}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{xunicode}
+\usepackage{xcolor}
+\begin{document}
+\begingroup\fontsize{12}{14}\selectfont
+
+\begin{longtable}[t]{lrrrr}
+\caption{\label{tab:unnamed-chunk-20}}\\
+\toprule
+Model & AIC & BIC & log.Likelihood. & DF\\
+\midrule
+LM & 3218.13 & 3284.62 & -1591.06 & 18.00\\
+GAM\_v1 & 3160.18 & 3307.84 & -1540.12 & 39.98\\
+GAM\_v2 & 3154.03 & 3327.11 & -1530.16 & 46.86\\
+\bottomrule
+\end{longtable}
+\endgroup{}
+\end{document}

@@ -28,6 +28,9 @@ library(gt)
 library(corrplot)
 library(caret)
 library(naniar)
+library(mgcv)
+library(kableExtra)
+library(sjPlot)
 
 options(
   ggplot2.continuous.colour = "viridis",
@@ -256,12 +259,41 @@ EBL's distribution is relatively normal across each group.
 
 Modeling:
 ```{r}
-lm_v1 <- lm(ebl ~ race*sex + age +  sex*op + ven_res + neo_chemo + 
+lm_v0 <- lm(ebl ~ race*sex + age +  sex + op + ven_res + neo_chemo + 
               neo_xrt + liver_test*les_size + age*or_time,
             data = pancreatic_df)
 
-summary(lm_v1)
+summary(lm_v0)
 ```
+
+Type of operation not really significant
+```{r}
+lm_v1 <- lm(ebl ~ race*sex + age +  sex + ven_res + neo_chemo + 
+              neo_xrt + liver_test*les_size + age*or_time,
+            data = pancreatic_df)
+
+anova(lm_v1, lm_v0)
+```
+the model with operation time doesn't provide better fit. So removing that
+
+
+```{r}
+lm_v2 <- lm(ebl ~ race + sex + age +  sex + ven_res + neo_chemo + 
+              neo_xrt + liver_test*les_size + age*or_time,
+            data = pancreatic_df)
+anova(lm_v2, lm_v1)
+
+lm_v3 <- lm(ebl ~ race*sex + age +  sex + ven_res + neo_chemo + 
+              neo_xrt + liver_test*les_size + age + or_time,
+            data = pancreatic_df)
+anova(lm_v3,lm_v1)
+
+lm_v4 <- lm(ebl ~ race*sex + age +  sex + ven_res + neo_chemo + 
+              neo_xrt + liver_test + les_size + age*or_time,
+            data = pancreatic_df)
+anova(lm_v4, lm_v1)
+```
+One with interactions for raceXsex, liver_testXles_size, ageXor_time significantly better
 
 ###Look at missingness
 ```{r}
@@ -295,4 +327,220 @@ system("pdfcrop figures_tables/missingness_byracegender.pdf figures_tables/missi
 missing_by_gender
 ```
 
-Look for other possible sources
+Look for other possible sources. 
+- check trend of ebl across each continuous variable to see if its even linear or not, if not linear can try gams
+
+Missingness in different quantile of age or other continuous variables
+```{r}
+colnames <- c("sex", "op","ven_res", "neo_chemo", "neo_xrt")
+names <- c("Sex", "Operation Type", "Reconstruction of Major Vasculature", "Prior Chemotherapy", "Prior Radiation Therapy")
+categorical_missing_pct <- lapply(1:length(colnames), function(x){
+  race_gender_missing <- pancreatic_df |>
+    dplyr::select(-prot_energy) |> 
+    group_by(get(colnames[x])) |> 
+    mutate(total = length(unique(patid))) |> 
+    ungroup() |> 
+    drop_na(race) |> 
+    group_by(get(colnames[x])) |> 
+    summarize (missing_pct = (total[1] - length(unique(patid)))*100/total[1]) |> 
+    mutate(dummy_group = 1)
+  colnames(race_gender_missing) <- c(colnames[x], "missing_pct", "dummy_group")
+  print(head(race_gender_missing))
+  
+  missing_by_cat <- ggplot(aes(x = get(colnames[x]), y = missing_pct, group = dummy_group), 
+         data = race_gender_missing) +
+    geom_point() +
+    geom_line() +
+    geom_line() +
+    labs(x = names[x], y = "Missing Data %") +
+    theme_classic()
+  
+  return(missing_by_cat)
+})
+
+do.call(gridExtra::grid.arrange, c(categorical_missing_pct, ncol = 3))
+
+pdf("figures_tables/missingness_percategorical_group.pdf", 
+       width = 9, height = 8)
+do.call(gridExtra::grid.arrange, c(categorical_missing_pct, ncol = 3))
+dev.off()
+```
+
+```{r}
+colnames <- c("ebl", "age","liver_test", "les_size", "or_time")
+names <- c("Estimated Blood Loss", "Age", "Bilirubin Level (in mg/dL)", "Tumor Size (in cm)", "Operation Time (in minutes)")
+get_quintile_missing_pct <- lapply(1:length(colnames), function(x){
+  df_filter <- pancreatic_df %>%
+    group_by(sex) |> 
+    mutate(xcol = get(colnames[x]), 
+           x_percentile = ntile(xcol, 100)) |> 
+    group_by(x_percentile, sex) |> 
+    summarise(n = n(), 
+              missing_y = sum(is.na(race)),
+              group = paste(as.character(min(xcol)), as.character(max(xcol)), sep = "-"),
+              covariate = colnames[x],
+              pct_missing_y = mean(is.na(race)) * 100)
+  
+  plot <- ggplot(df_filter,
+                 aes(x = x_percentile, y = pct_missing_y, color = sex)) +
+    geom_point(size = 0.5, alpha = 0.5) +
+    labs (x = paste(names[x], "(Percentile)" ), y = "% of Missing Race Info", 
+          color = "Sex") +
+  theme_classic()
+  
+  return(plot)
+})
+
+do.call(gridExtra::grid.arrange, c(get_quintile_missing_pct, ncol = 2))
+
+pdf("figures_tables/missingness_percontinuous_group.pdf", 
+       width = 10, height = 8)
+do.call(gridExtra::grid.arrange, c(get_quintile_missing_pct, ncol = 2))
+dev.off()
+```
+The distribution is missing percent against all the continous variables are randomly distributed.
+
+```{r}
+mcar_test(pancreatic_df |>  dplyr::select(-prot_energy))
+```
+NS --> MCAR holds
+
+Tumor size (heavily left-skewed)
+```{r}
+colnames <- c("ebl","age","liver_test", "les_size", "or_time")
+names <- c("Estimated Blood Loss", "Age", "Bilirubin Level (in mg/dL)", "Tumor Size (in cm)", "Operation Time (in minutes)")
+plots <- lapply(1:length(colnames), function(x){
+  plot <- ggplot(data = pancreatic_df |> drop_na(race),
+                 aes(x = get(colnames[x]))) +
+    geom_density(alpha = 0.5) +
+    labs (x = names[x], y = "Estimated Blood Loss") +
+    theme_classic()
+  return(plot)
+})
+
+do.call(gridExtra::grid.arrange, c(plots, ncol = 3))
+
+pdf("figures_tables/cont_variables_distribution.pdf", 
+       width = 8, height = 6)
+do.call(gridExtra::grid.arrange, c(plots, ncol = 3))
+dev.off()
+```
+
+```{r}
+colnames <- c("age","liver_test", "les_size", "or_time")
+names <- c("Age", "Bilirubin Level (in mg/dL)", "Tumor Size (in cm)", "Operation Time (in minutes)")
+plots <- lapply(1:length(colnames), function(x){
+  plot <- ggplot(data = pancreatic_df |> drop_na(race),
+                 aes(x = get(colnames[x]), y = ebl, fill = sex)) +
+    geom_point(size = 0.8) +
+    geom_smooth() +
+    labs (x = names[x], y = "Estimated Blood Loss") +
+    theme_classic()
+  return(plot)
+})
+
+do.call(gridExtra::grid.arrange, c(plots, ncol = 2))
+
+pdf("figures_tables/ebl_versus_cont_variable.pdf", 
+       width = 8, height = 6)
+do.call(gridExtra::grid.arrange, c(plots, ncol = 2))
+dev.off()
+```
+Bilirubin level - minimal association at smaller amount, increased association after 5
+
+GAM
+
+```{r}
+gam_v1 <- gam(ebl ~ race*sex + age +  sex + ven_res + neo_chemo + 
+              neo_xrt + s(liver_test) + s(les_size) + ti(liver_test, les_size) + age*or_time,
+            data = pancreatic_df)
+
+summary(gam_v1)
+gam.check(gam_v1)
+```
+
+```{r}
+gam_v2 <- gam(ebl ~ race*sex + age +  sex  + ven_res + neo_chemo + 
+              neo_xrt + s(liver_test) + s(log(les_size)) + ti(liver_test, log(les_size)) + age*or_time,
+            data = pancreatic_df)
+
+summary(gam_v2)
+```
+
+###Compare fit
+```{r}
+allmods_diag <- data.frame(
+  Model = c("LM", "GAM_v1", "GAM_v2"),
+  AIC   = c(AIC(lm_v1), AIC(gam_v1), AIC(gam_v2)),
+  BIC   = c(BIC(lm_v1), BIC(gam_v1), BIC(gam_v2)),
+  `log(Likelihood)` = c(as.numeric(logLik(lm_v1)), as.numeric(logLik(gam_v1)), 
+             as.numeric(logLik(gam_v2))), 
+  DF     = c(attr(logLik(lm_v1), "df"),
+             attr(logLik(gam_v1), "df"), 
+             attr(logLik(gam_v2), "df"))
+) |> 
+  kable(caption = "", 
+        booktabs = FALSE, longtable = FALSE, linesep = "", digits = 2, full_width = FALSE)  |> 
+  kable_styling(latex_options = "hold_position", font_size = 12) 
+
+#save_kable(allmods_diag, file = "figures_tables/model_comparison.pdf")
+#system("pdfcrop figures_tables/model_comparison.pdf figures_tables/model_comparison.pdf")
+
+allmods_diag
+```
+
+Based on this, GAM_v1 is chosen (but BIC is higher, so need to look into this)
+```{r, fig.align='center', fig.width=5, fig.height=4, warning = FALSE, message = FALSE}
+pdf("figures_tables/.pdf", width = 8, height = 8)
+plot(gam_v1, shade = TRUE, pages = 1, 
+     xlab = "liver_test", ylab = "s(liver_test), edf = 8.735")
+plot(gam_v1, shade = TRUE, pages = 1, 
+     xlab = "les_size", ylab = "s(les_size), edf = 7.134")
+dev.off()
+plot(gam_v1, shade = TRUE, pages = 1, 
+     xlab = "liver_test", ylab = "s(liver_test), edf = 8.735")
+plot(gam_v1, shade = TRUE, pages = 1, 
+     xlab = "les_size", ylab = "s(les_size), edf = 7.134")
+```
+
+```{r, fig.align='center', fig.width=7, fig.height=4, warning = FALSE, message = FALSE}
+plot_model(gam_v1, type = "pred", terms = c("or_time", "sex", "race")) +
+  labs(title = "", 
+       y = "Estimated Blood Loss (in mL) Prediction",
+     x = "Operation Time (in minutes)") +
+  theme_classic()
+ggsave("figures_tables/ebl_pred_race_gender_operatn_time.pdf", height = 4, width =8)
+```
+
+```{r, fig.align='center', fig.width=7, fig.height=4, warning = FALSE, message = FALSE}
+plot_model(gam_v1, type = "pred", terms = c("liver_test", "les_size", "sex", "race")) +
+  labs(title = "", 
+       y = "Estimated Blood Loss (in mL) Prediction",
+     x = "Bilirubin Level (in mg/dL)") +
+  theme_classic()
+ggsave("figures_tables/ebl_pred_race_gender_liver_test_tumorsize.pdf", height = 7, width =8)
+```
+Same trend in men and women across all 4 races
+
+```{r, fig.align='center', fig.width=4, fig.height=4, warning = FALSE, message = FALSE}
+plot_model(gam_v1, type = "pred", terms = c("sex", "race"), dodge = 0.6) +
+  labs(title = "", 
+       y = "Estimated Blood Loss (in mL) Prediction",
+     x = "") +
+  theme_classic() +
+  coord_flip()
+ggsave("figures_tables/ebl_pred_race_gender.pdf", height = 3, width =4)
+```
+
+```{r, fig.align='center', fig.width=5, fig.height=4, warning = FALSE, message = FALSE}
+plot_model(gam_v1, type = "pred", terms = c("neo_chemo", "neo_xrt"), dodge = 0.6) +
+  labs(title = "", 
+       y = "Estimated Blood Loss (in mL) Prediction",
+     x = "Prior Chemotherapy", color = "Prior Radiation Therapy") +
+  theme_classic() +
+  coord_flip()
+ggsave("figures_tables/ebl_pred_chem_rad_therapy.pdf", height = 3, width =5)
+```
+
+Consider that normal bilirubin level is 0.2-1.3. Compare the normal state with degree of increase or decrease from there
+
