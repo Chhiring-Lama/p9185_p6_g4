@@ -177,6 +177,17 @@ table1byrace |>
 ```
 
 ###correlation between predictors and within covariates
+```{r}
+cor_dat <- pancreatic_df |> 
+  dplyr::select(age, liver_test, ebl, les_size, or_time)
+cor_matrix <- cor(cor_dat, method = "pearson")
+rownames(cor_matrix) <- c("Age", "Bilirubin Level", "Estimated Blood Loss", "Tumor Size", "Operation Time")
+colnames(cor_matrix) <- c("Age", "Bilirubin Level", "Estimated Blood Loss", "Tumor Size", "Operation Time")
+pdf("figures_tables/corr_contvars.pdf", width = 6, height = 5)
+corrplot(cor_matrix, method = "circle")
+dev.off()
+corrplot(cor_matrix, method = "circle")
+```
 
 Male
 ```{r}
@@ -206,6 +217,28 @@ dev.off()
 corrplot(cor_matrix, method = "circle")
 ```
 operation time and age negatively correlated in men but no to low positive correlation in women
+
+```{r}
+df_filter <- pancreatic_df %>%
+    group_by(sex) |> 
+    mutate(age_quintile = ntile(age, 5)*20) |> 
+  group_by(sex, age_quintile) |> 
+  mutate(age_group = paste(min(age), max(age), sep = "-"))
+  
+plot <- ggplot(df_filter,
+                 aes(x = or_time, y = ebl, color = sex, group = sex)) +
+    geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth() +
+    labs (x = "Operation Time", y = "EBL", 
+          color = "Sex", title = "Operation Time versus EBL by Age Quintile") + 
+    facet_wrap(~age_quintile) +
+  theme_classic()
+pdf("figures_tables/ebl_vs_ortime_age.pdf", 
+       width = 10, height = 8)
+plot
+dev.off()
+```
+
 
 ### EBL Distribution in each categorical covariates
 ```{r, fig.height = 6, fig.width=8}
@@ -264,7 +297,7 @@ pancreatic_df <- pancreatic_df |>
 Modeling:
 ```{r}
 lm_v0 <- lm(ebl ~ race + sex + age +  sex + op + ven_res + neo_chemo + 
-              neo_xrt + liver_test + les_size + age*or_time,
+              neo_xrt + liver_test + les_size + age + or_time,
             data = pancreatic_df)
 
 summary(lm_v0)
@@ -461,13 +494,14 @@ gam.check(gam_v1)
 
 ```{r}
 gam_v2 <- gam(ebl ~ race + sex + age +  sex + ven_res + neo_chemo + 
-              neo_xrt + s(liver_test) + s(les_size) + age+or_time,
+              neo_xrt + s(liver_test) + s(les_size) + or_time,
             data = pancreatic_df)
 
 summary(gam_v2)
 anova(gam_v1, gam_v2)
 ```
 
+selected gam_v2
 ```{r}
 pdf("figures_tables/gamv1_diagnostic_plot.pdf",
        width = 6, height = 5)
@@ -532,10 +566,10 @@ ggsave("figures_tables/ebl_pred_race_gender_age.pdf", height = 4, width =8)
 ```
 
 ```{r, fig.align='center', fig.width=5, fig.height=4, warning = FALSE, message = FALSE}
-plot_model(gam_v2, type = "pred", terms = c("or_time", "neo_chemo", "neo_xrt"), dodge = 0.6) +
+plot_model(gam_v2, type = "pred", terms = c("or_time","neo_chemo", "neo_xrt"), dodge = 0.6) +
   labs(title = "", 
        y = "Estimated Blood Loss (in mL) Prediction",
-     x = "Prior Chemotherapy", color = "Prior Radiation Therapy") +
+     x = "Operation Time", color = "Prior Chemotherapy") +
   theme_classic()
 ggsave("figures_tables/ebl_pred_chem_rad_therapy.pdf", height = 4, width =8)
 ```
