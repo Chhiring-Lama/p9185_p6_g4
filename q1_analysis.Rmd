@@ -590,7 +590,7 @@ Bilirubin level - minimal association at smaller amount, increased association a
 GAM
 
 ```{r}
-gam_v1 <- gam(ebl ~ race + sex + age +  sex + ven_res + neo_chemo + 
+gam_v1 <- gam(ebl ~ race*sex + age +  sex + ven_res + neo_chemo + 
               neo_xrt + s(liver_test) + les_size + age*or_time,
             data = pancreatic_df)
 
@@ -599,7 +599,7 @@ gam.check(gam_v1)
 ```
 
 ```{r}
-gam_v2 <- gam(ebl ~ race + sex + age +  sex + ven_res + neo_chemo + 
+gam_v2 <- gam(ebl ~ race*sex + age +  sex + ven_res + neo_chemo + 
               neo_xrt + s(liver_test) + les_size + or_time,
             data = pancreatic_df)
 
