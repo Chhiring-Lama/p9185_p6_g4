@@ -335,9 +335,20 @@ anova(lm_v3,lm_v1)
 One with interactions for raceXsex, liver_testXles_size, ageXor_time significantly better
 
 ```{r}
-#check_model(lm_v1)
-#ggsave(filename = "figures_tables/lm_diagnostic_plot.pdf",
-    #   width = 10, height = 15)
+pdf("figures_tables/lm_dharmaplot.pdf", width = 7, height = 5)
+plot(lm_v1)
+dev.off()
+sim_ad <- scale(residuals(lm_v1))
+ks.test(sim_ad, "pnorm")
+```
+
+```{r}
+pdf("figures_tables/lm_diagnostic_plot.pdf",
+       width = 5, height = 12)
+par(mfrow=c(4,1), mar = c(2, 4, 2, 1))
+plot(lm_v1)
+par(mfrow=c(1, 1))
+dev.off()
 ```
 
 ###Look at missingness
@@ -610,10 +621,18 @@ anova(gam_v1, gam_v2)
 selected gam_v2
 ```{r}
 pdf("figures_tables/gamv1_diagnostic_plot.pdf",
-       width = 6, height = 5)
+       width = 5, height = 12)
+par(mfrow=c(4,1), mar = c(2, 4, 2, 1))
 gam.check(gam_v2)
+par(mfrow=c(1, 1))
 dev.off()
 ```
+
+```{r}
+sim_ad <- scale(residuals(gam_v2))
+ks.test(sim_ad, "pnorm")
+```
+
 
 ###Compare fit
 ```{r}
@@ -638,7 +657,7 @@ allmods_diag
 Based on this, lm_v1 is chosen 
 ```{r, fig.align='center', fig.width=5, fig.height=4, warning = FALSE, message = FALSE}
 pdf("figures_tables/gamv1_smoothfunc.pdf", width = 8, height = 8)
-plot(lm_v1, shade = TRUE, pages = 1)
+plot(gam_v2, shade = TRUE, pages = 1)
 dev.off()
 #plot(lm_v1, shade = TRUE, pages = 1)
 ```
@@ -652,13 +671,13 @@ plot_model(lm_v1, type = "pred", terms = c("or_time", "sex", "race")) +
 ggsave("figures_tables/ebl_pred_race_gender_operatn_time.pdf", height = 4, width =8)
 ```
 
-```{r, fig.align='center', fig.width=7, fig.height=4, warning = FALSE, message = FALSE}
-plot_model(lm_v1, type = "pred", terms = c("les_size", "sex", "race")) + 
+```{r, fig.align='center', fig.width=8, fig.height=4, warning = FALSE, message = FALSE}
+plot_model(lm_v1, type = "pred", terms = c("les_size", "ven_res", "sex")) + 
   labs(title = "", 
        y = "Estimated Blood Loss (in mL) Prediction",
-     x = "Tumor Size (in cm)") +
+     x = "Tumor Size (in cm)", color = "Major Vasculature Reconstruction") +
   theme_classic()
-ggsave("figures_tables/ebl_pred_race_gender_liver_test_tumorsize.pdf", height = 4, width =8)
+ggsave("figures_tables/ebl_pred_gender_ven_res_tumorsize.pdf", height = 4, width =10)
 ```
 Same trend in men and women across all 4 races
 
@@ -672,11 +691,15 @@ ggsave("figures_tables/ebl_pred_race_gender_age.pdf", height = 4, width =8)
 ```
 
 ```{r, fig.align='center', fig.width=5, fig.height=4, warning = FALSE, message = FALSE}
-plot_model(lm_v1, type = "pred", terms = c("or_time","neo_chemo", "neo_xrt"), dodge = 0.6) +
+plot_mod <- plot_model(lm_v1, type = "pred", 
+                       terms = c("or_time","neo_chemo", "neo_xrt"), dodge = 0.6) +
   labs(title = "", 
        y = "Estimated Blood Loss (in mL) Prediction",
      x = "Operation Time", color = "Prior Chemotherapy") +
   theme_classic()
+
+plot_mod$data$facet <- c("Radiation Therapy: No", "Radiation Therapy: Yes")
+plot_mod
 ggsave("figures_tables/ebl_pred_chem_rad_therapy.pdf", height = 4, width =8)
 ```
 
@@ -886,4 +909,17 @@ lapply(pairs, function(compare){
 })
 ```
 No significant difference in coefficients so results from CCA is robust. 
+
+Sample-size calculation
+```{r}
+sig = 0.05
+power = 0.80
+d = 40/(summary(lm_v1)$sigma)
+z_1minusa = qnorm(1-sig/2)
+z_power = qnorm(power)
+n_pergroup = (z_1minusa + z_power)^2/(d^2*0.25)
+n_pergroup
+nadj = n_pergroup/(1 - 0.2)
+```
+
 
