@@ -34,6 +34,7 @@ library(sjPlot)
 library(performance)
 library(DHARMa)
 library(patchwork)
+library(tidyr)
 
 options(
   ggplot2.continuous.colour = "viridis",
@@ -53,10 +54,12 @@ pancreatic_df <- read_csv("data/ebl.csv") |>
   mutate(sex = case_when(sex == 0 ~ "Male", 
                          sex == 1 ~ "Female"), 
          sex = fct_relevel(sex, "Male"),
-         race = case_when(race == 0 ~ "White", 
-                         race == 1 ~ "Black", 
-                         race == 2 ~ "Asian", 
-                         race == 3 ~ "Hispanic"), 
+         race2 = case_when(is.na(race) == TRUE ~ "NA", 
+                         TRUE ~ "non-NA"), 
+         race = case_when(race == 0 ~ "White",
+                          race == 1 ~ "Black", 
+                          race == 2 ~ "Asian",
+                          race == 3 ~ "Hispanic"),
          race = fct_relevel(race, "White"), 
          op = as.factor(case_when(op == 0 ~ "Body or tail", 
                         op == 1 ~ "Whipple operation")),
@@ -77,6 +80,11 @@ table1  <- pancreatic_df %>%
   dplyr::select(age:or_time) %>%
   tbl_summary(
     by = sex,
+    type = list(
+      ven_res ~ "categorical",
+      neo_chemo ~ "categorical",
+      neo_xrt ~ "categorical"
+    ),
     statistic = list(
       all_continuous()  ~ "{mean} ({sd})",    # drop min/max to save space
       all_categorical() ~ "{n} ({p}%)"),
@@ -130,6 +138,11 @@ table1byrace  <- pancreatic_df %>%
   dplyr::select(age:or_time) %>%
   tbl_summary(
     by = race,
+    type = list(
+      ven_res ~ "categorical",
+      neo_chemo ~ "categorical",
+      neo_xrt ~ "categorical"
+    ),
     statistic = list(all_continuous()  ~ "{mean} ({sd})",    # drop min/max to save space
       all_categorical() ~ "{n} ({p}%)"),
     label = list(age ~ "Age (years)",
@@ -296,8 +309,8 @@ pancreatic_df <- pancreatic_df |>
 
 Modeling:
 ```{r}
-lm_v0 <- lm(ebl ~ race + sex + age +  sex + op + ven_res + neo_chemo + 
-              neo_xrt + liver_test + les_size + age + or_time,
+lm_v0 <- lm(ebl ~ race*sex + age + op + ven_res + neo_chemo + 
+              neo_xrt + liver_test + les_size + age*or_time,
             data = pancreatic_df)
 
 summary(lm_v0)
@@ -305,7 +318,7 @@ summary(lm_v0)
 
 Type of operation not really significant
 ```{r}
-lm_v1 <- lm(ebl ~ race + sex + age +  sex + ven_res + neo_chemo + 
+lm_v1 <- lm(ebl ~ race*sex + age + ven_res + neo_chemo + 
               neo_xrt + liver_test + les_size + age*or_time,
             data = pancreatic_df)
 
@@ -314,7 +327,7 @@ anova(lm_v1, lm_v0)
 the model with operation time doesn't provide better fit. So removing that
 
 ```{r}
-lm_v3 <- lm(ebl ~ race+sex + age +  sex + ven_res + neo_chemo + 
+lm_v3 <- lm(ebl ~ race*sex + age + ven_res + neo_chemo + 
               neo_xrt + liver_test + les_size + age + or_time,
             data = pancreatic_df)
 anova(lm_v3,lm_v1)
@@ -328,6 +341,62 @@ One with interactions for raceXsex, liver_testXles_size, ageXor_time significant
 ```
 
 ###Look at missingness
+```{r}
+table1byrace  <- pancreatic_df %>%
+  dplyr::select(c(age:or_time, race2)) %>%
+  tbl_summary(
+    by = race2,
+    type = list(
+      ven_res ~ "categorical",
+      neo_chemo ~ "categorical",
+      neo_xrt ~ "categorical"
+    ),
+    statistic = list(all_continuous()  ~ "{mean} ({sd})",    # drop min/max to save space
+      all_categorical() ~ "{n} ({p}%)"),
+    label = list(age ~ "Age (years)",
+      sex ~ "Sex",
+      liver_test ~ "Bilirubin Level (in mg/dL)", 
+      op ~ "Type of Operation", 
+      ebl ~ "Estimated Intraoperative Blood Loss (in mL)", 
+      ven_res ~ "Resection + Reconstruction of Major Vasculature", 
+      neo_chemo ~ "Chemotherapy Prior to Surgery", 
+      neo_xrt ~ "Radiation Therapy Prior to Surgery", 
+      les_size ~ "Tumor Size (in cm)", 
+      or_time ~ "Operation Time (in mins)")) %>%
+  add_p() %>%
+  add_overall() %>%
+  bold_labels() %>%
+  modify_caption("**Baseline Characteristics by Race**")
+table1bv2 <- table1byrace %>%
+  as_gt() %>%
+  gt::tab_options(
+    data_row.padding = px(2),
+    table.width      = pct(100),
+    table.border.top.color = "black",
+    table.border.bottom.color = "black",
+    heading.border.bottom.color = "black",
+    table.font.color = "black",
+    column_labels.border.bottom.style = "none", # Remove header line
+    table_body.border.bottom.style = "none",    # Remove body line
+    table_body.border.top.style = "none",
+    table.border.top.style = "none",
+    table.font.names = "arial",
+    table.font.size = "12px" 
+  ) |> 
+  cols_width(
+    label      ~ px(150),
+    everything() ~ px(80)
+  ) |> 
+  gt::tab_style(
+    style = gt::cell_borders(), 
+    locations = gt::cells_body(columns = everything()))  |> 
+  gt::gtsave(filename = "figures_tables/table_missingness.pdf")
+system("pdfcrop figures_tables/table_missingness.pdf figures_tables/table_missingness.pdf")
+
+table1byrace |> 
+  as_kable()
+```
+
 ```{r}
 fig2b <- vis_miss(pancreatic_df |> dplyr::select(-prot_energy)) + 
   theme(axis.text.x = element_text(vjust = 0))
@@ -399,13 +468,44 @@ dev.off()
 ```
 
 ```{r}
+colnames <- c("sex", "op","ven_res", "neo_chemo", "neo_xrt")
+names <- c("Sex", "Operation Type", "Reconstruction of Major Vasculature", "Prior Chemotherapy", "Prior Radiation Therapy")
+categorical_missing_pct <- lapply(1:length(colnames), function(x){
+  a <- pancreatic_df |> 
+    mutate(xcol = get(colnames[x])) |> 
+    group_by(xcol, race) |> 
+    summarise(n = n()) |> 
+    mutate(sum = sum(n)) |> 
+    dplyr::filter(is.na(race) == TRUE) |> 
+    mutate(yes = n/sum, no = 1- yes) |> 
+    dplyr::select(xcol, n, sum, yes, no) |> 
+    ungroup() |> pivot_longer(cols = yes:no)
+  
+  missing_by_cat <- ggplot(aes(x = xcol, y = value, fill = name), 
+         data = a) +
+    geom_bar(stat = "identity", position = "fill") +
+    labs(x = names[x], fill = "Missing Data", y = "") +
+    theme_classic()
+  
+  return(missing_by_cat)
+})
+
+do.call(gridExtra::grid.arrange, c(categorical_missing_pct, ncol = 3))
+
+pdf("figures_tables/missingness_percategorical_group_barplot.pdf", 
+       width = 11, height = 7)
+do.call(gridExtra::grid.arrange, c(categorical_missing_pct, ncol = 3))
+dev.off()
+```
+
+```{r}
 colnames <- c("ebl", "age","liver_test", "les_size", "or_time")
 names <- c("Estimated Blood Loss", "Age", "Bilirubin Level (in mg/dL)", "Tumor Size (in cm)", "Operation Time (in minutes)")
 get_quintile_missing_pct <- lapply(1:length(colnames), function(x){
   df_filter <- pancreatic_df %>%
     group_by(sex) |> 
     mutate(xcol = get(colnames[x]), 
-           x_percentile = ntile(xcol, 100)) |> 
+           x_percentile = ntile(xcol, 20)*5) |> 
     group_by(x_percentile, sex) |> 
     summarise(n = n(), 
               missing_y = sum(is.na(race)),
@@ -436,7 +536,7 @@ The distribution is missing percent against all the continous variables are rand
 ```{r}
 mcar_test(pancreatic_df |>  dplyr::select(-prot_energy))
 ```
-NS --> MCAR holds
+significant, reject MCAR, moving forward with MAR assumption
 
 Tumor size (heavily left-skewed)
 ```{r}
@@ -460,10 +560,16 @@ dev.off()
 ```
 
 ```{r}
+outliers_filtered <- pancreatic_df |> 
+  drop_na(race) |> 
+  dplyr::filter(les_size < 11, 
+                liver_test < 20)
+  
+  
 colnames <- c("age","liver_test", "les_size", "or_time")
 names <- c("Age", "Bilirubin Level (in mg/dL)", "Tumor Size (in cm)", "Operation Time (in minutes)")
 plots <- lapply(1:length(colnames), function(x){
-  plot <- ggplot(data = pancreatic_df |> drop_na(race),
+  plot <- ggplot(data = outliers_filtered,
                  aes(x = get(colnames[x]), y = ebl)) +
     geom_point(size = 0.8) +
     geom_smooth() +
@@ -485,7 +591,7 @@ GAM
 
 ```{r}
 gam_v1 <- gam(ebl ~ race + sex + age +  sex + ven_res + neo_chemo + 
-              neo_xrt + s(liver_test) + s(les_size) + age*or_time,
+              neo_xrt + s(liver_test) + les_size + age*or_time,
             data = pancreatic_df)
 
 summary(gam_v1)
@@ -494,7 +600,7 @@ gam.check(gam_v1)
 
 ```{r}
 gam_v2 <- gam(ebl ~ race + sex + age +  sex + ven_res + neo_chemo + 
-              neo_xrt + s(liver_test) + s(les_size) + or_time,
+              neo_xrt + s(liver_test) + les_size + or_time,
             data = pancreatic_df)
 
 summary(gam_v2)
@@ -512,7 +618,7 @@ dev.off()
 ###Compare fit
 ```{r}
 allmods_diag <- data.frame(
-  Model = c("LM", "GAM_v1"),
+  Model = c("LM", "GAM"),
   AIC   = c(AIC(lm_v1), AIC(gam_v2)),
   BIC   = c(BIC(lm_v1), BIC(gam_v2)),
   `log(Likelihood)` = c(as.numeric(logLik(lm_v1)), as.numeric(logLik(gam_v2))), 
@@ -529,16 +635,16 @@ allmods_diag <- data.frame(
 allmods_diag
 ```
 
-Based on this, GAM_v1 is chosen (but BIC is higher, so need to look into this)
+Based on this, lm_v1 is chosen 
 ```{r, fig.align='center', fig.width=5, fig.height=4, warning = FALSE, message = FALSE}
 pdf("figures_tables/gamv1_smoothfunc.pdf", width = 8, height = 8)
-plot(gam_v2, shade = TRUE, pages = 1)
+plot(lm_v1, shade = TRUE, pages = 1)
 dev.off()
-plot(gam_v2, shade = TRUE, pages = 1)
+#plot(lm_v1, shade = TRUE, pages = 1)
 ```
 
 ```{r, fig.align='center', fig.width=7, fig.height=4, warning = FALSE, message = FALSE}
-plot_model(gam_v2, type = "pred", terms = c("or_time", "sex", "race")) +
+plot_model(lm_v1, type = "pred", terms = c("or_time", "sex", "race")) +
   labs(title = "", 
        y = "Estimated Blood Loss (in mL) Prediction",
      x = "Operation Time (in minutes)") +
@@ -547,7 +653,7 @@ ggsave("figures_tables/ebl_pred_race_gender_operatn_time.pdf", height = 4, width
 ```
 
 ```{r, fig.align='center', fig.width=7, fig.height=4, warning = FALSE, message = FALSE}
-plot_model(gam_v2, type = "pred", terms = c("les_size", "sex", "race")) + 
+plot_model(lm_v1, type = "pred", terms = c("les_size", "sex", "race")) + 
   labs(title = "", 
        y = "Estimated Blood Loss (in mL) Prediction",
      x = "Tumor Size (in cm)") +
@@ -557,7 +663,7 @@ ggsave("figures_tables/ebl_pred_race_gender_liver_test_tumorsize.pdf", height = 
 Same trend in men and women across all 4 races
 
 ```{r, fig.align='center', fig.width=4, fig.height=4, warning = FALSE, message = FALSE}
-plot_model(gam_v2, type = "pred", terms = c("age", "sex", "race"), dodge = 0.6) +
+plot_model(lm_v1, type = "pred", terms = c("age", "sex", "race"), dodge = 0.6) +
   labs(title = "", 
        y = "Estimated Blood Loss (in mL) Prediction",
      x = "Age") +
@@ -566,7 +672,7 @@ ggsave("figures_tables/ebl_pred_race_gender_age.pdf", height = 4, width =8)
 ```
 
 ```{r, fig.align='center', fig.width=5, fig.height=4, warning = FALSE, message = FALSE}
-plot_model(gam_v2, type = "pred", terms = c("or_time","neo_chemo", "neo_xrt"), dodge = 0.6) +
+plot_model(lm_v1, type = "pred", terms = c("or_time","neo_chemo", "neo_xrt"), dodge = 0.6) +
   labs(title = "", 
        y = "Estimated Blood Loss (in mL) Prediction",
      x = "Operation Time", color = "Prior Chemotherapy") +
@@ -576,7 +682,7 @@ ggsave("figures_tables/ebl_pred_chem_rad_therapy.pdf", height = 4, width =8)
 
 Consider that normal bilirubin level is 0.2-1.3. Compare the normal state with degree of increase or decrease from there
 ```{r, fig.align='center', fig.width=4, fig.height=4, warning = FALSE, message = FALSE}
-plot_model(gam_v2, type = "pred", terms = c("sex", "race"), dodge = 0.6) +
+plot_model(lm_v1, type = "pred", terms = c("sex", "race"), dodge = 0.6) +
   labs(title = "", 
        y = "Estimated Blood Loss (in mL) Prediction",
      x = "Age") +
@@ -651,7 +757,7 @@ bc_tbl <- tbl_regression(
       ven_res ~ "Resection + Reconstruction of Major Vasculature", 
       neo_chemo ~ "Chemotherapy Prior to Surgery", 
       neo_xrt ~ "Radiation Therapy Prior to Surgery", 
-      `s(les_size)` ~ "s(Tumor Size (in cm))", 
+      `les_size` ~ "Tumor Size (in cm)", 
       or_time ~ "Operation Time (in mins)"),
 ) %>%
   bold_labels() %>%  
@@ -691,8 +797,7 @@ smooth_df <- smooth_df[, c("term", "edf", "F", "p-value")]
 colnames(smooth_df) <- c("term", "edf", "statistic", "p.value")
 
 smooth_df <-  smooth_df %>% mutate(p.value = case_when(p.value==0~"<0.001", TRUE~as.character(p.value))) |> 
-  mutate(term = case_when(term == "s(liver_test)" ~ "s(Bilirubin Level (in mg/dL))", 
-                          term == "s(les_size)" ~ "s(Tumor Size (in cm))"))
+  mutate(term = case_when(term == "s(liver_test)" ~ "s(Bilirubin Level (in mg/dL))"))
 
 
 smooth_df %>%
@@ -717,3 +822,68 @@ smooth_df %>%
 
 system("pdfcrop figures_tables/gam_smooth_eff.pdf figures_tables/gam_smooth_eff.pdf")
 ```
+
+## sensitivity analysis (PMM)
+
+lm_v1 for ebl with all other covariates, excluding race (for NAs and non-NAs)
+```{r}
+data_complete <- pancreatic_df |> 
+  dplyr::filter(race2 != "NA")
+data_incomplete <- pancreatic_df |> 
+  dplyr::filter(race2== "NA")
+
+lm_v1_complete <- lm(ebl ~ sex + age + ven_res + neo_chemo + 
+              neo_xrt + liver_test + les_size + age*or_time,
+            data = data_complete)
+lm_v1_incomplete <- lm(ebl ~ sex + age + ven_res + neo_chemo + 
+              neo_xrt + liver_test + les_size + age*or_time,
+            data = data_incomplete)
+lm_list <- list(lm_v1_complete, 
+                lm_v1_incomplete)
+names(lm_list) <- c("LM Complete", "LM Missing Race")
+```
+
+```{r}
+pairs <- combn(names(lm_list), 2, simplify = FALSE)
+
+lapply(pairs, function(compare){
+  first_fit <- lm_list[[compare[1]]]
+  second_fit <- lm_list[[compare[2]]]
+  coef_first <- coef(first_fit)
+  coef_second <- coef(second_fit)
+  
+  vcov_first <- vcov(first_fit)
+  vcov_second <- vcov(second_fit)
+  
+  overlapping_terms <- intersect(names(coef_first), 
+                                 names(coef_second))
+  res_complete_late <- lapply(overlapping_terms, function(term){
+  
+    beta1 <- coef_first[term]
+    beta2 <- coef_second[term]
+  
+    var1 <- vcov_first[term, term]
+    var2 <- vcov_second[term, term]
+  
+    z <- (beta1 - beta2) / sqrt(var1 + var2)
+    p <- 2 * (1 - pnorm(abs(z)))
+    
+    data.frame(
+      `Group` = paste0(compare[1], " vs ", compare[2]), 
+      `Beta1` = beta1, `Beta2` = beta2, `z` = z, `P-value` = p
+    )
+  })
+  df = as.data.frame(do.call(rbind, res_complete_late))
+  nrows = nrow(df)
+  comp <- knitr::kable(df, digits = 3) |> 
+    kable_styling(latex_options = c("striped", "hold_position"), font_size = 12)  |>
+  row_spec(0, extra_css = "border: 1px solid black;") |>
+  column_spec(1:6, 
+              extra_css = "border-left: 1px solid black; border-right: 1px solid black;") |>
+  row_spec(1:nrows, extra_css = "border-top: 1px solid black; border-bottom: 1px solid black;")
+  print(comp)
+  #save_kable(comp, file = paste0("figures_tables/coef_comparison", compare[1], compare[2], ".pdf"))
+})
+```
+No significant difference in coefficients so results from CCA is robust. 
+
